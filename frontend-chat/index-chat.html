@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat Kantor AI Lokal</title>
+<style>
+body { font-family: Arial, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; background: #f4f7fb; color: #172033; }
+.app { background: white; border: 1px solid #dce5f2; border-radius: 16px; overflow: hidden; box-shadow: 0 12px 30px #223a5d18; }
+header { padding: 20px 24px; background: #173f67; color: white; }
+#messages { min-height: 360px; max-height: 520px; overflow: auto; padding: 20px; }
+.message { padding: 12px 14px; border-radius: 12px; margin: 10px 0; white-space: pre-wrap; line-height: 1.5; }
+.user { margin-left: 20%; background: #e5f1ff; }
+.assistant { margin-right: 20%; background: #f0f3f7; }
+form { display: flex; gap: 8px; padding: 16px; border-top: 1px solid #e1e7ef; }
+input, select, button { font: inherit; padding: 11px 12px; border-radius: 9px; border: 1px solid #cbd7e6; }
+input { flex: 1; } button { background: #1769aa; color: white; cursor: pointer; border: 0; } button:disabled { opacity: .55; cursor: wait; }
+#status { padding: 0 20px 14px; color: #5b6a7d; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="app">
+<header><h1>Chat Kantor AI Lokal</h1><p>HTML client → FastAPI → LM Studio/Qwen</p></header>
+<div style="padding:16px 20px 0"><label>Agent <select id="agent"><option value="melati">Melati - Finance</option><option value="arief">Arief - Developer Helper</option></select></label></div>
+<main id="messages"><div class="message assistant">Halo. Tulis pertanyaan untuk memulai.</div></main>
+<div id="status">Siap.</div>
+<form id="chat-form"><input id="prompt" autocomplete="off" placeholder="Contoh: buat ringkasan pengeluaran bulan ini" required><button id="send">Kirim</button></form>
+</div>
+<script>
+const API_URL = 'http://localhost:8001';
+const messagesEl = document.querySelector('#messages');
+const form = document.querySelector('#chat-form');
+const promptEl = document.querySelector('#prompt');
+const sendEl = document.querySelector('#send');
+const statusEl = document.querySelector('#status');
+const agentEl = document.querySelector('#agent');
+const history = [];
+function addMessage(role, text) { const el = document.createElement('div'); el.className = `message ${role}`; el.textContent = text; messagesEl.appendChild(el); messagesEl.scrollTop = messagesEl.scrollHeight; return el; }
+async function sendMessage(text) {
+history.push({ role: 'user', content: text });
+const bot = addMessage('assistant', '');
+sendEl.disabled = true; statusEl.textContent = 'Menunggu jawaban...';
+try {
+const response = await fetch(`${API_URL}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker_id: agentEl.value, messages: history }) });
+if (!response.ok) throw new Error(`API gagal (${response.status})`);
+const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let answer = '';
+while (true) { const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const parts = buffer.split('\n\n'); buffer = parts.pop(); for (const part of parts) { const line = part.split('\n').find(x => x.startsWith('data: ')); if (!line) continue; const item = JSON.parse(line.slice(6)); if (item.type === 'token') { answer += item.content; bot.textContent = answer; messagesEl.scrollTop = messagesEl.scrollHeight; } if (item.type === 'error') throw new Error(item.message); } }
+history.push({ role: 'assistant', content: answer }); statusEl.textContent = 'Selesai.';
+} catch (error) { bot.textContent = `Gagal: ${error.message}`; statusEl.textContent = 'Periksa backend, port, dan CORS.'; history.pop(); }
+finally { sendEl.disabled = false; promptEl.focus(); }
+}
+form.addEventListener('submit', event => { event.preventDefault(); const text = promptEl.value.trim(); if (!text || sendEl.disabled) return; addMessage('user', text); promptEl.value = ''; sendMessage(text); });
+</script>
+</body>
+</html>
