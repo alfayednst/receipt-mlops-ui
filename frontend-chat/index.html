@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ekstraksi Data Struk</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; background: #f1f5f9; color: #172033; }
+        .app { overflow: hidden; background: white; border: 1px solid #dce5f2; border-radius: 18px; box-shadow: 0 12px 30px #223a5d18; }
+        header { padding: 22px 24px; color: white; background: linear-gradient(120deg, #173f67, #1769aa); }
+        header h1 { margin: 0 0 8px; }
+        header p { margin: 0; color: #e1efff; }
+        main { padding: 22px; }
+        form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        input, button { padding: 11px 12px; border-radius: 9px; font: inherit; }
+        input { flex: 1; min-width: 220px; border: 1px solid #cbd7e6; }
+        button { border: 0; color: white; background: #1769aa; cursor: pointer; }
+        button:hover { background: #12578e; }
+        button:disabled { opacity: .55; cursor: wait; }
+        #status { margin: 16px 0; color: #5b6a7d; }
+        .receipt { overflow: hidden; border: 1px solid #e1e8f0; border-radius: 14px; animation: appear .35s ease-out; }
+        .receipt-header { padding: 22px; text-align: center; background: #f7fafc; border-bottom: 1px dashed #cbd5e1; }
+        .receipt-header h2 { margin: 0 0 8px; font-size: 1.5rem; }
+        .receipt-header p { margin: 0; color: #64748b; }
+        .receipt-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px 22px; border-bottom: 1px dashed #cbd5e1; }
+        .info-label, .muted { color: #64748b; font-size: .85rem; }
+        .info-value { display: block; margin-top: 5px; font-weight: 700; overflow-wrap: anywhere; }
+        .items { padding: 18px 22px; }
+        .items h3 { margin: 0 0 12px; font-size: 1rem; }
+        .item { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid #edf1f5; }
+        .item:last-child { border-bottom: 0; }
+        .item-name { font-weight: 700; }
+        .item-detail { margin-top: 5px; color: #64748b; font-size: .88rem; }
+        .item-total { flex: 0 0 auto; font-weight: 700; text-align: right; }
+        .totals { padding: 16px 22px; background: #f7fafc; border-top: 1px dashed #cbd5e1; }
+        .total-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; }
+        .grand-total { margin-top: 8px; padding-top: 14px; border-top: 1px solid #dce5f2; font-size: 1.2rem; font-weight: 800; }
+        .receipt-footer { padding: 14px 22px; color: #64748b; font-size: .8rem; text-align: center; }
+        [hidden] { display: none !important; }
+        @keyframes appear { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @media (max-width: 520px) {
+            .receipt-info { grid-template-columns: 1fr 1fr; }
+            main { padding: 16px; }
+            .receipt-info, .items, .totals { padding-right: 16px; padding-left: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header>
+            <h1>Ekstraksi Data Struk</h1>
+            <p>Upload gambar struk untuk mengambil data transaksi.</p>
+        </header>
+        <main>
+            <form id="upload-form">
+                <input id="receipt-file" type="file" accept="image/*" required>
+                <button id="upload-button" type="submit">Upload dan Ekstrak</button>
+            </form>
+            <div id="status" role="status">Pilih gambar struk untuk memulai.</div>
+            <section id="receipt" class="receipt" aria-label="Hasil ekstraksi struk" hidden></section>
+        </main>
+    </div>
+    <script>
+        const API_URL = 'http://localhost:8000/api/receipts/extract';
+        const form = document.querySelector('#upload-form');
+        const fileInput = document.querySelector('#receipt-file');
+        const uploadButton = document.querySelector('#upload-button');
+        const statusEl = document.querySelector('#status');
+        const receiptEl = document.querySelector('#receipt');
+
+        function createElement(tag, className, text) {
+            const element = document.createElement(tag);
+            if (className) element.className = className;
+            if (text !== undefined) element.textContent = text;
+            return element;
+        }
+
+        function formatMoney(value, currency = 'IDR') {
+            const amount = Number(value) || 0;
+            try {
+                return new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+            } catch {
+                return `${currency} ${amount.toLocaleString('id-ID')}`;
+            }
+        }
+
+        function formatDate(value) {
+            if (!value) return '-';
+            const date = new Date(`${value}T00:00:00`);
+            return Number.isNaN(date.getTime())
+                ? value
+                : new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+        }
+
+        function addInfo(container, label, value) {
+            const item = createElement('div');
+            item.append(createElement('span', 'info-label', label), createElement('span', 'info-value', value || '-'));
+            container.append(item);
+        }
+
+        function addTotal(container, label, value, currency, isGrandTotal = false) {
+            const row = createElement('div', `total-row${isGrandTotal ? ' grand-total' : ''}`);
+            row.append(createElement('span', '', label), createElement('span', '', formatMoney(value, currency)));
+            container.append(row);
+        }
+
+        function renderReceipt(response) {
+            const data = response.data;
+            const currency = data.currency || 'IDR';
+            receiptEl.replaceChildren();
+
+            const heading = createElement('div', 'receipt-header');
+            heading.append(
+                createElement('h2', '', data.merchant || 'Struk Transaksi'),
+                createElement('p', '', 'Rincian transaksi berhasil diekstrak')
+            );
+
+            const info = createElement('div', 'receipt-info');
+            addInfo(info, 'Tanggal transaksi', formatDate(data.transaction_date));
+            addInfo(info, 'Metode pembayaran', data.payment_method || '-');
+            addInfo(info, 'Mata uang', currency);
+
+            const itemsSection = createElement('div', 'items');
+            itemsSection.append(createElement('h3', '', 'Item pembelian'));
+            for (const item of data.items || []) {
+                const row = createElement('div', 'item');
+                const description = createElement('div');
+                description.append(
+                    createElement('div', 'item-name', item.name || 'Item'),
+                    createElement('div', 'item-detail', `${item.quantity ?? 0} × ${formatMoney(item.unit_price, currency)}`)
+                );
+                row.append(description, createElement('div', 'item-total', formatMoney(item.subtotal, currency)));
+                itemsSection.append(row);
+            }
+
+            const totals = createElement('div', 'totals');
+            addTotal(totals, 'Subtotal', data.subtotal, currency);
+            addTotal(totals, 'Pajak', data.tax, currency);
+            addTotal(totals, 'Diskon', data.discount == null ? 0 : data.discount, currency);
+            addTotal(totals, 'Total pembayaran', data.total, currency, true);
+
+            const footer = createElement('div', 'receipt-footer',
+                `Model: ${response.metadata?.model || '-'} · Status: ${response.metadata?.processing_status || 'success'}`);
+
+            receiptEl.append(heading, info, itemsSection, totals, footer);
+            receiptEl.hidden = false;
+        }
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            uploadButton.disabled = true;
+            statusEl.textContent = 'Mengunggah dan memproses struk...';
+            receiptEl.hidden = true;
+
+            try {
+                const response = await fetch(API_URL, { method: 'POST', headers: { accept: '*/*' }, body: formData });
+                const body = await response.json();
+                if (!response.ok || body.success === false) {
+                    throw new Error(body.detail || body.message || `API gagal (${response.status})`);
+                }
+                if (!body.data) throw new Error('Format respons API tidak sesuai.');
+                renderReceipt(body);
+                statusEl.textContent = 'Ekstraksi berhasil.';
+            } catch (error) {
+                statusEl.textContent = `Gagal: ${error.message}. Periksa backend dan CORS.`;
+            } finally {
+                uploadButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

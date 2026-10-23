@@ -17,6 +17,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("receipt-api")
 
 app = FastAPI(title="Receipt Finance API", version="1.0.0")
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5500", "http://127.0.0.1:5500", "http://localhost:8001", "http://127.0.0.1:8001"], allow_methods=["*"], allow_headers=["*"])
 
 client = AsyncOpenAI(
     base_url=os.getenv("MODEL_BASE_URL", "http://127.0.0.1:1234/v1"),
